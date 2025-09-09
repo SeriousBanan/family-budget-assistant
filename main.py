@@ -20,6 +20,15 @@ def round_income(income: decimal.Decimal) -> decimal.Decimal:
     return income.quantize(decimal.Decimal("0.01"), rounding=decimal.ROUND_CEILING)
 
 
+def input_decimal(prompt: str) -> decimal.Decimal:
+    while True:
+        try:
+            value = decimal.Decimal(input(prompt))
+            return value
+        except decimal.DecimalException:
+            print("Wrong input. Try again.")
+
+
 def main() -> None:
     budget_file_path: typing.Final = Path("budget.yaml")
 
@@ -34,31 +43,35 @@ def main() -> None:
 
     for user_name, user_budget in budget.users_budgets.items():
         for expenditure in user_budget.expenditures:
+            info = ExpenditureAnalyzeInfo(user_name, expenditure, decimal.Decimal(0))
             if expenditure.sharable:
-                sharable_expenditures_by_type[expenditure.type].append(
-                    ExpenditureAnalyzeInfo(user_name, expenditure, decimal.Decimal(0))
-                )
-
+                sharable_expenditures_by_type[expenditure.type].append(info)
             else:
-                expenditures_by_users[user_name].append(
-                    ExpenditureAnalyzeInfo(user_name, expenditure, decimal.Decimal(0))
-                )
+                expenditures_by_users[user_name].append(info)
 
+    _request_remaining_funds_sharable(sharable_expenditures_by_type)
+    _request_remaining_funds_personal(expenditures_by_users)
+
+    for expenditures_infos in sharable_expenditures_by_type.values():
+        for info in expenditures_infos:
+            expenditures_by_users[info.user_name].append(info)
+
+    users_incomes = _request_users_incomes(budget.users_budgets.keys())
+
+    print()
+
+    _analyze_user_budget(expenditures_by_users, users_incomes)
+
+
+def _request_remaining_funds_sharable(
+    sharable_expenditures_by_type: dict[UserName, list[ExpenditureAnalyzeInfo]],
+) -> None:
     print("Request for remaining funds of sharable expenditures")
 
     for expenditure_type, expenditures_infos in sharable_expenditures_by_type.items():
         if expenditures_infos[0].expenditure.permanent:
             continue
-
-        while True:
-            try:
-                remaining_funds = decimal.Decimal(input(f"\t{expenditure_type}? "))
-            except decimal.DecimalException:
-                pass
-
-            else:
-                break
-
+        remaining_funds = input_decimal(f"\t{expenditure_type}? ")
         total_planned_budget = sum(
             (info.expenditure.planned_budget for info in expenditures_infos),
             start=decimal.Decimal(0),
@@ -69,47 +82,38 @@ def main() -> None:
             )
             info.remaining_funds = remaining_funds * planned_budget_ratio
 
+
+def _request_remaining_funds_personal(
+    expenditures_by_users: dict[UserName, list[ExpenditureAnalyzeInfo]],
+) -> None:
     for user_name, expenditures_infos in expenditures_by_users.items():
         print(f"Requesting {user_name} for remaining funds of expenditures")
         for info in expenditures_infos:
             if info.expenditure.permanent:
                 continue
+            remaining_funds = input_decimal(f"\t{info.expenditure.type}? ")
 
-            while True:
-                try:
-                    remaining_funds = decimal.Decimal(
-                        input(f"\t{info.expenditure.type}? ")
-                    )
-                except decimal.DecimalException:
-                    pass
+            info.remaining_funds = remaining_funds
 
-                else:
-                    break
 
-        info.remaining_funds = remaining_funds
-
+def _request_users_incomes(
+    users: typing.Iterable[UserName],
+) -> dict[UserName, decimal.Decimal]:
     users_incomes: dict[UserName, decimal.Decimal] = {}
-
-    for expenditure_type, expenditures_infos in sharable_expenditures_by_type.items():
-        for info in expenditures_infos:
-            expenditures_by_users[info.user_name].append(info)
-
     print("Requesting Users incomes")
 
-    for user_name in budget.users_budgets:
-        while True:
-            try:
-                income = decimal.Decimal(input(f"\t{user_name}? "))
-            except decimal.DecimalException:
-                pass
-
-            else:
-                break
+    for user_name in users:
+        income = input_decimal(f"\t{user_name}? ")
 
         users_incomes[user_name] = income
 
-    print()
+    return users_incomes
 
+
+def _analyze_user_budget(
+    expenditures_by_users: dict[UserName, list[ExpenditureAnalyzeInfo]],
+    users_incomes: dict[UserName, decimal.Decimal],
+) -> None:
     for user_name, expenditures_infos in expenditures_by_users.items():
         expenditures_infos.sort(key=lambda info: info.expenditure.priority)
 
@@ -129,14 +133,14 @@ def main() -> None:
                 f"\t{expenditure_info.expenditure.type}: {round_income(expenditure_refill)}"
             )
 
-        print(f"\tLeft income: {round_income( user_income)}")
+        print(f"\tLeft income: {round_income(user_income)}")
 
 
 if __name__ == "__main__":
     import sys
 
     try:
-        sys.exit(main())
+        main()
 
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
